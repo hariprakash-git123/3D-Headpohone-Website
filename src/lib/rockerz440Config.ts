@@ -101,6 +101,10 @@ export const ROCKERZ_COLORWAYS: RockerzColorway[] = [
   },
 ];
 
+export function isColorwayId(value: string): value is RockerzColorwayId {
+  return ROCKERZ_COLORWAYS.some((c) => c.id === value);
+}
+
 export function getColorwayById(id: RockerzColorwayId): RockerzColorway {
   return ROCKERZ_COLORWAYS.find((c) => c.id === id) || ROCKERZ_COLORWAYS[0];
 }

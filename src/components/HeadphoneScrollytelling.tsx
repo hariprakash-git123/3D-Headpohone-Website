@@ -12,98 +12,32 @@ import {
 import { ArrowDown, ArrowRight, ChevronRight } from "lucide-react";
 import type { NavSectionId } from "@/components/Navbar";
 import type { RockerzColorwayId } from "@/lib/rockerz440Config";
-import { sequenceStore, TOTAL_SEQUENCE_FRAMES } from "@/lib/sequenceStore";
+import { sequenceStore } from "@/lib/sequenceStore";
+import { mapScrollProgressToFrame } from "@/lib/frameMapping";
+import {
+  chapterIndexForProgress,
+  scrollToStageProgress,
+  STORY_CHAPTERS,
+} from "@/lib/chapters";
 import {
   createSequenceRenderer,
   SequenceRendererHandle,
 } from "@/lib/sequenceRenderer";
 
-function clamp01(v: number): number {
-  return v < 0 ? 0 : v > 1 ? 1 : v;
-}
+const FOCUS_RING =
+  "focus:outline-none focus-visible:ring-2 focus-visible:ring-boatRed focus-visible:ring-offset-2 focus-visible:ring-offset-obsidian";
 
-function smoothstep(t: number): number {
-  const x = clamp01(t);
-  return x * x * (3 - 2 * x);
-}
-
-function easeInOutCubic(t: number): number {
-  const x = clamp01(t);
-  return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2;
-}
-
-/**
- * Deterministic, velocity-remapped scroll-to-frame curve across the original 235-frame
- * boAt Rockerz 440 sequence. Stretches the disassembly frames (102 -> 172) for gradual,
- * zero-burst separation and smoothly reverses on reassembly & upward scroll.
- */
-export function mapScrollProgressToFrame(progress: number): number {
-  const p = clamp01(progress);
-
-  // Phase 1 (0% -> 20%): Assembled boAt Rockerz 440, gentle lift from hero studio pose
-  if (p <= 0.2) {
-    const t = smoothstep(p / 0.2);
-    return 1 + t * 44; // frames 1 -> 45
-  }
-
-  // Phase 2 (20% -> 40%): Initial separation — rises upright and seams begin opening gently
-  if (p <= 0.4) {
-    const t = (p - 0.2) / 0.2;
-    return 45 + t * 57; // frames 45 -> 102
-  }
-
-  // Phase 3 (40% -> 70%): Full disassembly (slow-mo stretched across 30% of scroll)
-  if (p <= 0.7) {
-    const t = (p - 0.4) / 0.3;
-    return 102 + t * 70; // frames 102 -> 172
-  }
-
-  // Phase 4 (70% -> 85%): Exploded product showcase — settles cleanly into aligned diagram
-  if (p <= 0.85) {
-    const t = smoothstep((p - 0.7) / 0.15);
-    return 172 + t * (TOTAL_SEQUENCE_FRAMES - 172); // frames 172 -> 235
-  }
-
-  // Phase 5 (85% -> 100%): Smooth reverse reassembly back to assembled hero shot
-  const t = easeInOutCubic((p - 0.85) / 0.15);
-  return TOTAL_SEQUENCE_FRAMES - t * (TOTAL_SEQUENCE_FRAMES - 1); // frames 235 -> 1
-}
+/** Stage progress after which the final CTA buttons become interactive */
+const CTA_INTERACTIVE_FROM = 0.87;
 
 interface HeadphoneScrollytellingProps {
-  containerRef: React.RefObject<HTMLDivElement>;
+  containerRef: React.RefObject<HTMLDivElement | null>;
   colorway: RockerzColorwayId;
   onActiveBeatChange?: (section: NavSectionId) => void;
   onJumpToSpecs: () => void;
   onJumpToExplore: () => void;
 }
 
-const CHAPTERS = [
-  { id: "overview" as const, label: "Overview", phase: "Assembled", progress: 0.0 },
-  {
-    id: "design" as const,
-    label: "Design",
-    phase: "Initial Separation",
-    progress: 0.3,
-  },
-  {
-    id: "engineering" as const,
-    label: "Engineering",
-    phase: "Full Disassembly",
-    progress: 0.56,
-  },
-  {
-    id: "sound" as const,
-    label: "Sound",
-    phase: "Exploded Showcase",
-    progress: 0.78,
-  },
-  {
-    id: "explore" as const,
-    label: "Rockerz 440",
-    phase: "Reassembled",
-    progress: 0.98,
-  },
-];
 
 export default function HeadphoneScrollytelling({
   containerRef,
@@ -120,6 +54,7 @@ export default function HeadphoneScrollytelling({
   const [heroReady, setHeroReady] = useState(false);
   const [loadPercent, setLoadPercent] = useState(0);
   const [activeChapterIdx, setActiveChapterIdx] = useState(0);
+  const [ctaInteractive, setCtaInteractive] = useState(false);
 
   const { scrollYProgress } = useScroll({
     target: containerRef,
@@ -146,21 +81,29 @@ export default function HeadphoneScrollytelling({
     });
     rendererRef.current = renderer;
 
-    if (sequenceStore.isLoaded(0)) {
-      setHeroReady(true);
-      setLoadPercent(sequenceStore.getLoadPercent());
+    let lastReportedPct = -1;
+    const syncLoadState = () => {
+      if (sequenceStore.canDrawHero()) setHeroReady(true);
+      const pct = sequenceStore.getLoadPercent();
+      // Throttle re-renders to every 5%, but always report completion.
+      if (pct === 100 || pct - lastReportedPct >= 5) {
+        lastReportedPct = pct;
+        setLoadPercent(pct);
+      }
+    };
+    syncLoadState();
+    if (sequenceStore.canDrawHero()) {
       renderer.setFrame(currentFrameRef.current, true);
     }
 
-    const unsubscribe = sequenceStore.subscribe((pct, loadedIdx) => {
-      if (loadedIdx === 0) {
-        setHeroReady(true);
+    const unsubscribe = sequenceStore.subscribe((_pct, settledIdx, ok) => {
+      syncLoadState();
+      if (
+        ok &&
+        (settledIdx === 0 ||
+          Math.abs(settledIdx + 1 - currentFrameRef.current) <= 2)
+      ) {
         renderer.setFrame(currentFrameRef.current, true);
-      } else if (Math.abs(loadedIdx + 1 - currentFrameRef.current) <= 2) {
-        renderer.setFrame(currentFrameRef.current, true);
-      }
-      if (pct === 100 || loadedIdx % 8 === 0) {
-        setLoadPercent(pct);
       }
     });
 
@@ -187,39 +130,16 @@ export default function HeadphoneScrollytelling({
     currentFrameRef.current = frameFloat;
     rendererRef.current?.setFrame(frameFloat);
 
-    let nextIdx = 0;
-    let navSection: NavSectionId = "overview";
-    if (latest < 0.2) {
-      nextIdx = 0;
-      navSection = "overview";
-    } else if (latest < 0.4) {
-      nextIdx = 1;
-      navSection = "design";
-    } else if (latest < 0.7) {
-      nextIdx = 2;
-      navSection = "engineering";
-    } else if (latest < 0.85) {
-      nextIdx = 3;
-      navSection = "sound";
-    } else {
-      nextIdx = 4;
-      navSection = "explore";
-    }
-
-    setActiveChapterIdx((prev) => (prev !== nextIdx ? nextIdx : prev));
-    onActiveBeatChange?.(navSection);
+    const nextIdx = chapterIndexForProgress(latest);
+    setActiveChapterIdx(nextIdx);
+    setCtaInteractive(latest >= CTA_INTERACTIVE_FROM);
+    onActiveBeatChange?.(STORY_CHAPTERS[nextIdx].id);
   });
 
-  const scrollToStageProgress = (progress: number) => {
-    const el = containerRef.current;
-    if (!el) return;
-    const rect = el.getBoundingClientRect();
-    const top = window.scrollY + rect.top;
-    const scrollable = Math.max(0, el.offsetHeight - window.innerHeight);
-    window.scrollTo({
-      top: top + scrollable * progress,
-      behavior: reducedMotion ? "auto" : "smooth",
-    });
+  const jumpToProgress = (progress: number) => {
+    if (containerRef.current) {
+      scrollToStageProgress(containerRef.current, progress, !reducedMotion);
+    }
   };
 
   // --- Synchronized Storytelling Beats ---
@@ -279,19 +199,16 @@ export default function HeadphoneScrollytelling({
     [0.85, 0.93],
     reducedMotion ? [0, 0] : [26, 0]
   );
-  const ctaPointerEvents = useTransform(smoothProgress, (v) =>
-    v >= 0.87 ? "auto" : "none"
-  );
 
   return (
     <section
       ref={containerRef}
       id="overview"
       aria-label="boAt Rockerz 440 Interactive Scroll Disassembly"
-      className="relative h-[460vh] w-full bg-[#050505]"
+      className="relative h-[460vh] w-full bg-obsidian"
     >
       {/* Sticky Full-Screen Cinematic Stage */}
-      <div className="sticky top-0 h-screen w-full overflow-hidden bg-[#050505]">
+      <div className="sticky top-0 h-svh w-full overflow-hidden bg-obsidian">
         {/* Restrained Studio Ambient Glow Behind Original Product */}
         <motion.div
           style={{ opacity: auraOpacity }}
@@ -310,6 +227,8 @@ export default function HeadphoneScrollytelling({
         {/* Original boAt Rockerz 440 WebGL/Canvas Sequence Renderer */}
         <motion.canvas
           ref={canvasRef}
+          role="img"
+          aria-label="boAt Rockerz 440 headphones, animating from assembled to an exploded view of their internal parts as you scroll"
           style={{ scale: canvasScale }}
           className={`absolute inset-0 h-full w-full will-change-transform transition-opacity duration-500 ${
             heroReady ? "opacity-100" : "opacity-0"
@@ -328,11 +247,12 @@ export default function HeadphoneScrollytelling({
         {/* Minimal Architectural Phase Header (Desktop) */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-8 top-[72px] z-10 hidden justify-between text-[10.5px] font-medium tracking-[0.22em] text-white/30 uppercase lg:flex"
+          className="pointer-events-none absolute inset-x-8 top-[72px] z-10 hidden justify-between text-[10.5px] font-medium tracking-[0.22em] text-white/55 uppercase lg:flex"
         >
           <span>BOAT ROCKERZ 440 // INTERACTIVE DISASSEMBLY</span>
           <span className="tabular-nums">
-            0{activeChapterIdx + 1} / 05 — {CHAPTERS[activeChapterIdx].phase}
+            0{activeChapterIdx + 1} / 0{STORY_CHAPTERS.length} —{" "}
+            {STORY_CHAPTERS[activeChapterIdx].phase}
           </span>
         </div>
 
@@ -346,9 +266,9 @@ export default function HeadphoneScrollytelling({
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.65, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
-              className="mb-3 inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.26em] text-[#FF3B30] uppercase"
+              className="mb-3 inline-flex items-center gap-2 text-[11px] font-semibold tracking-[0.26em] text-boatRed uppercase"
             >
-              <span className="h-1.5 w-1.5 rounded-full bg-[#FF3B30] shadow-[0_0_10px_#FF3B30]" />
+              <span className="h-1.5 w-1.5 rounded-full bg-boatRed shadow-[0_0_10px_#FF3B30]" />
               boAt Rockerz 440
             </motion.p>
 
@@ -368,21 +288,21 @@ export default function HeadphoneScrollytelling({
             transition={{ duration: 0.8, delay: 0.32, ease: [0.22, 1, 0.36, 1] }}
             className="flex flex-col items-center gap-5"
           >
-            <p className="max-w-xl text-[15px] sm:text-[17px] leading-relaxed text-[#A1A1AA]">
+            <p className="max-w-xl text-[15px] sm:text-[17px] leading-relaxed text-mutedZinc">
               Meet boAt Rockerz 440. A closer look at the design behind your
               listening experience.
             </p>
 
             <motion.div
               style={{ opacity: scrollCueOpacity }}
-              className="flex flex-col items-center gap-2 text-[11px] font-medium tracking-[0.22em] text-white/45 uppercase"
+              className="flex flex-col items-center gap-2 text-[11px] font-medium tracking-[0.22em] text-white/60 uppercase"
             >
               <span>Scroll to explore</span>
               <motion.div
                 animate={reducedMotion ? undefined : { y: [0, 5, 0] }}
                 transition={{ duration: 2, repeat: Infinity, ease: "easeInOut" }}
               >
-                <ArrowDown className="h-3.5 w-3.5 text-[#FF3B30]" />
+                <ArrowDown className="h-3.5 w-3.5 text-boatRed" />
               </motion.div>
             </motion.div>
           </motion.div>
@@ -392,20 +312,20 @@ export default function HeadphoneScrollytelling({
         <motion.div
           style={{ opacity: designOpacity }}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-[8] h-[48vh] bg-gradient-to-t from-[#050505]/95 via-[#050505]/70 to-transparent md:inset-y-0 md:left-0 md:right-auto md:h-auto md:w-[54vw] md:max-w-[600px] md:bg-gradient-to-r md:from-[#050505]/92 md:via-[#050505]/55 md:to-transparent"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-[8] h-[48vh] bg-gradient-to-t from-obsidian/95 via-obsidian/70 to-transparent md:inset-y-0 md:left-0 md:right-auto md:h-auto md:w-[54vw] md:max-w-[600px] md:bg-gradient-to-r md:from-obsidian/92 md:via-obsidian/55 md:to-transparent"
         />
         <motion.div
           style={{ opacity: designOpacity, x: designX }}
           className="pointer-events-none absolute inset-0 z-10 flex items-end px-6 pb-[7vh] sm:px-12 md:items-center md:pb-0 lg:px-20"
         >
           <div className="max-w-[430px]">
-            <p className="mb-3 text-[11px] font-semibold tracking-[0.24em] text-[#FF3B30] uppercase">
+            <p className="mb-3 text-[11px] font-semibold tracking-[0.24em] text-boatRed uppercase">
               Design &nbsp;·&nbsp; Every Detail Matters
             </p>
             <h2 className="text-gradient-editorial text-[clamp(2rem,4vw,3.35rem)] font-bold leading-[1.06] tracking-[-0.035em]">
               Designed to stand out.
             </h2>
-            <p className="mt-4 text-[15.5px] sm:text-[17px] leading-[1.65] text-[#A1A1AA]">
+            <p className="mt-4 text-[15.5px] sm:text-[17px] leading-[1.65] text-mutedZinc">
               Soft foam-padded ear cushions, contoured rounded-oval ear cups,
               and a lightweight padded headband with foldable hinges come
               together for effortless all-day wear.
@@ -416,7 +336,7 @@ export default function HeadphoneScrollytelling({
                 (item) => (
                   <span
                     key={item}
-                    className="rounded-full border border-white/[0.1] bg-[#0A0A0C]/80 px-3.5 py-1 text-[11.5px] font-medium text-white/80 backdrop-blur-md"
+                    className="rounded-full border border-white/[0.1] bg-carbon/80 px-3.5 py-1 text-[11.5px] font-medium text-white/80 backdrop-blur-md"
                   >
                     {item}
                   </span>
@@ -430,20 +350,20 @@ export default function HeadphoneScrollytelling({
         <motion.div
           style={{ opacity: engOpacity }}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-[8] h-[48vh] bg-gradient-to-t from-[#050505]/95 via-[#050505]/70 to-transparent md:inset-y-0 md:left-auto md:right-0 md:h-auto md:w-[54vw] md:max-w-[600px] md:bg-gradient-to-l md:from-[#050505]/92 md:via-[#050505]/55 md:to-transparent"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-[8] h-[48vh] bg-gradient-to-t from-obsidian/95 via-obsidian/70 to-transparent md:inset-y-0 md:left-auto md:right-0 md:h-auto md:w-[54vw] md:max-w-[600px] md:bg-gradient-to-l md:from-obsidian/92 md:via-obsidian/55 md:to-transparent"
         />
         <motion.div
           style={{ opacity: engOpacity, x: engX }}
-          className="pointer-events-none absolute inset-0 z-10 flex items-end justify-start px-6 pb-[7vh] sm:px-12 md:items-center md:justify-end md:pb-0 lg:px-20"
+          className="pointer-events-none absolute inset-0 z-10 flex items-end justify-start px-6 pb-[7vh] sm:px-12 md:items-center md:justify-end md:pb-0 lg:px-20 xl:pr-36"
         >
           <div className="max-w-[430px] text-left">
-            <p className="mb-3 text-[11px] font-semibold tracking-[0.24em] text-[#FF3B30] uppercase">
+            <p className="mb-3 text-[11px] font-semibold tracking-[0.24em] text-boatRed uppercase">
               Engineering &nbsp;·&nbsp; Inside the Experience
             </p>
             <h2 className="text-gradient-editorial text-[clamp(2rem,4vw,3.35rem)] font-bold leading-[1.06] tracking-[-0.035em]">
               Built from the inside out.
             </h2>
-            <p className="mt-4 text-[15.5px] sm:text-[17px] leading-[1.65] text-[#A1A1AA]">
+            <p className="mt-4 text-[15.5px] sm:text-[17px] leading-[1.65] text-mutedZinc">
               Every layer aligns with purpose—from the reinforced adjustable
               headband core and precision-mounted 40mm dynamic drivers to the
               integrated control board and rechargeable battery pack.
@@ -456,7 +376,7 @@ export default function HeadphoneScrollytelling({
                 "Integrated ear-cup control board & rechargeable power cell",
               ].map((line) => (
                 <li key={line} className="flex items-start gap-2.5">
-                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-[#FF3B30]" />
+                  <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-boatRed" />
                   <span>{line}</span>
                 </li>
               ))}
@@ -468,7 +388,7 @@ export default function HeadphoneScrollytelling({
         <motion.div
           style={{ opacity: soundOpacity }}
           aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 bottom-0 z-[8] h-[44vh] bg-gradient-to-t from-[#050505]/95 via-[#050505]/70 to-transparent"
+          className="pointer-events-none absolute inset-x-0 bottom-0 z-[8] h-[44vh] bg-gradient-to-t from-obsidian/95 via-obsidian/70 to-transparent"
         />
         <motion.div
           style={{ opacity: soundOpacity, y: soundY }}
@@ -476,13 +396,13 @@ export default function HeadphoneScrollytelling({
         >
           <div className="mx-auto flex w-full max-w-[1220px] flex-col justify-between gap-6 lg:flex-row lg:items-end">
             <div className="max-w-[520px]">
-              <p className="mb-2.5 text-[11px] font-semibold tracking-[0.24em] text-[#FF3B30] uppercase">
+              <p className="mb-2.5 text-[11px] font-semibold tracking-[0.24em] text-boatRed uppercase">
                 Sound &nbsp;·&nbsp; Made for Your Moments
               </p>
               <h2 className="text-gradient-editorial text-[clamp(2rem,4vw,3.35rem)] font-bold leading-[1.06] tracking-[-0.035em]">
                 Your world. Your sound.
               </h2>
-              <p className="mt-3.5 text-[15.5px] sm:text-[17px] leading-[1.6] text-[#A1A1AA]">
+              <p className="mt-3.5 text-[15.5px] sm:text-[17px] leading-[1.6] text-mutedZinc">
                 Tuned for boAt Signature Sound through 40mm dynamic drivers,
                 with wireless Bluetooth connectivity, 3.5mm AUX dual-mode
                 flexibility, and built-in call controls.
@@ -497,9 +417,9 @@ export default function HeadphoneScrollytelling({
               ].map((stat) => (
                 <div
                   key={stat.label}
-                  className="rounded-2xl border border-white/[0.08] bg-[#0A0A0C]/85 px-4 py-3 backdrop-blur-md"
+                  className="rounded-2xl border border-white/[0.08] bg-carbon/85 px-4 py-3 backdrop-blur-md"
                 >
-                  <p className="text-[10.5px] font-medium tracking-[0.16em] text-[#A1A1AA] uppercase">
+                  <p className="text-[10.5px] font-medium tracking-[0.16em] text-mutedZinc uppercase">
                     {stat.label}
                   </p>
                   <p className="mt-0.5 text-[14px] font-semibold tracking-[-0.01em] text-white">
@@ -526,15 +446,14 @@ export default function HeadphoneScrollytelling({
           />
         </motion.div>
         <motion.div
-          style={{
-            opacity: ctaOpacity,
-            y: ctaY,
-            pointerEvents: ctaPointerEvents,
-          }}
-          className="absolute inset-0 z-20 flex flex-col items-center justify-between px-6 pt-[11vh] pb-[6.5vh] text-center"
+          style={{ opacity: ctaOpacity, y: ctaY }}
+          aria-hidden={!ctaInteractive}
+          className={`absolute inset-0 z-20 flex flex-col items-center justify-between px-6 pt-[11vh] pb-[6.5vh] text-center ${
+            ctaInteractive ? "pointer-events-auto" : "pointer-events-none"
+          }`}
         >
           <div className="max-w-3xl">
-            <p className="mb-3 text-[11px] font-semibold tracking-[0.26em] text-[#FF3B30] uppercase">
+            <p className="mb-3 text-[11px] font-semibold tracking-[0.26em] text-boatRed uppercase">
               Back Together
             </p>
             <h2 className="text-gradient-hero text-[clamp(2.2rem,5.2vw,4.3rem)] font-bold leading-[1.04] tracking-[-0.04em] drop-shadow-[0_14px_40px_rgba(0,0,0,0.8)]">
@@ -542,12 +461,13 @@ export default function HeadphoneScrollytelling({
             </h2>
           </div>
 
-          <div className="flex flex-col items-center gap-4">
+          {/* inert keeps the hidden buttons out of the Tab order until they fade in */}
+          <div className="flex flex-col items-center gap-4" inert={!ctaInteractive}>
             <div className="flex flex-wrap items-center justify-center gap-4">
               <button
                 type="button"
                 onClick={onJumpToExplore}
-                className="btn-boat-cta group inline-flex items-center gap-2.5 rounded-full px-7 py-3.5 text-[14.5px] font-semibold tracking-[-0.01em] text-white focus:outline-none"
+                className={`btn-boat-cta group inline-flex items-center gap-2.5 rounded-full px-7 py-3.5 text-[14.5px] font-semibold tracking-[-0.01em] text-white ${FOCUS_RING}`}
               >
                 <span>Explore Rockerz 440</span>
                 <ArrowRight className="h-4 w-4 transition-transform duration-300 group-hover:translate-x-0.5" />
@@ -556,35 +476,36 @@ export default function HeadphoneScrollytelling({
               <button
                 type="button"
                 onClick={onJumpToSpecs}
-                className="group inline-flex items-center gap-1.5 rounded-full border border-white/[0.14] bg-[#0A0A0C]/80 px-6 py-3.5 text-[14px] font-medium text-white/90 backdrop-blur-md transition-all duration-300 hover:border-[#FF3B30]/55 hover:text-white focus:outline-none"
+                className={`group inline-flex items-center gap-1.5 rounded-full border border-white/[0.14] bg-carbon/80 px-6 py-3.5 text-[14px] font-medium text-white/90 backdrop-blur-md transition-all duration-300 hover:border-boatRed/55 hover:text-white ${FOCUS_RING}`}
               >
                 <span>View Specifications</span>
-                <ChevronRight className="h-4 w-4 text-[#FF3B30] transition-transform duration-300 group-hover:translate-x-0.5" />
+                <ChevronRight className="h-4 w-4 text-boatRed transition-transform duration-300 group-hover:translate-x-0.5" />
               </button>
             </div>
           </div>
         </motion.div>
 
         {/* Minimal Right-Edge Chapter Scrubber Rail (Desktop) */}
-        <div
-          aria-label="Scroll Story Chapters"
+        <nav
+          aria-label="Story chapters"
           className="absolute right-6 top-1/2 z-30 hidden -translate-y-1/2 flex-col items-end gap-3.5 xl:flex"
         >
-          {CHAPTERS.map((ch, idx) => {
+          {STORY_CHAPTERS.map((ch, idx) => {
             const active = activeChapterIdx === idx;
             return (
               <button
                 key={ch.id}
                 type="button"
-                onClick={() => scrollToStageProgress(ch.progress)}
-                className="group flex items-center gap-2.5 py-0.5 focus:outline-none"
+                onClick={() => jumpToProgress(ch.jumpTo)}
+                className={`group flex items-center gap-2.5 rounded-sm py-0.5 ${FOCUS_RING}`}
                 aria-label={`Jump to ${ch.label}`}
+                aria-current={active ? "step" : undefined}
               >
                 <span
                   className={`text-[10px] font-medium tracking-[0.16em] uppercase transition-all duration-300 ${
                     active
                       ? "translate-x-0 text-white opacity-90"
-                      : "translate-x-1 text-[#A1A1AA] opacity-0 group-hover:translate-x-0 group-hover:opacity-85"
+                      : "translate-x-1 text-mutedZinc opacity-0 group-hover:translate-x-0 group-hover:opacity-85 group-focus-visible:translate-x-0 group-focus-visible:opacity-85"
                   }`}
                 >
                   {ch.label}
@@ -592,19 +513,21 @@ export default function HeadphoneScrollytelling({
                 <span
                   className={`block rounded-full transition-all duration-300 ${
                     active
-                      ? "h-5 w-[3px] bg-[#FF3B30] shadow-[0_0_12px_rgba(255,59,48,0.85)]"
+                      ? "h-5 w-[3px] bg-boatRed shadow-[0_0_12px_rgba(255,59,48,0.85)]"
                       : "h-2.5 w-[2px] bg-white/20 group-hover:bg-white/55"
                   }`}
                 />
               </button>
             );
           })}
-        </div>
+        </nav>
 
         {/* Unobtrusive sequence buffer indicator */}
         {loadPercent < 100 && (
-          <div className="pointer-events-none absolute bottom-5 left-6 z-30 flex items-center gap-2 rounded-full border border-white/[0.08] bg-[#0A0A0C]/80 px-3 py-1.5 text-[10.5px] tracking-[0.14em] text-[#A1A1AA] uppercase backdrop-blur-md">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#FF3B30]" />
+          <div
+            role="status"
+            className="pointer-events-none absolute bottom-5 left-6 z-30 flex items-center gap-2 rounded-full border border-white/[0.08] bg-carbon/80 px-3 py-1.5 text-[10.5px] tracking-[0.14em] text-mutedZinc uppercase backdrop-blur-md">
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-boatRed" />
             <span className="tabular-nums">Loading frames {loadPercent}%</span>
           </div>
         )}
