@@ -1,0 +1,166 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    background-color: #050505;
+    color: #ffffff;
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    background-color: #050505;
+    color: #ffffff;
+    overflow-x: hidden;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  }
+
+  ::selection {
+    background-color: rgba(255, 59, 48, 0.32);
+    color: #ffffff;
+  }
+}
+
+/* Minimal dark luxury scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: #050505;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.14);
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 59, 48, 0.55);
+}
+
+/* Metallic Luxury Typography Gradients */
+.text-gradient-hero {
+  background: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    rgba(244, 244, 246, 0.94) 58%,
+    rgba(196, 196, 204, 0.82) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.text-gradient-editorial {
+  background: linear-gradient(
+    180deg,
+    #ffffff 0%,
+    rgba(236, 236, 240, 0.92) 68%,
+    rgba(180, 180, 190, 0.84) 100%
+  );
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+/* Dark Glassmorphism Navigation Bar */
+.glass-nav {
+  background: rgba(5, 5, 5, 0.78);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+}
+
+/* Primary boAt Flagship CTA Button */
+.btn-boat-cta {
+  position: relative;
+  background: linear-gradient(135deg, #ff3b30 0%, #d9261c 100%);
+  box-shadow:
+    0 0 0 1px rgba(255, 110, 102, 0.35),
+    0 12px 32px -10px rgba(255, 59, 48, 0.52),
+    inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  transition: transform 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    box-shadow 0.28s cubic-bezier(0.22, 1, 0.36, 1),
+    filter 0.28s ease;
+}
+
+.btn-boat-cta:hover {
+  transform: translateY(-1px);
+  box-shadow:
+    0 0 0 1px rgba(255, 130, 122, 0.6),
+    0 16px 40px -8px rgba(255, 59, 48, 0.66),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  filter: brightness(1.06);
+}
+
+.btn-boat-cta:active {
+  transform: translateY(0px) scale(0.985);
+}
+
+/* Minimal Subtle Red-Accented Nav Pill CTA */
+.btn-nav-pill {
+  position: relative;
+  background: rgba(12, 12, 15, 0.85);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  transition: all 0.28s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.btn-nav-pill:hover {
+  border-color: rgba(255, 59, 48, 0.65);
+  background: rgba(255, 59, 48, 0.14);
+  box-shadow: 0 0 24px -6px rgba(255, 59, 48, 0.55);
+}
+
+.btn-nav-pill:active {
+  transform: scale(0.98);
+}
+
+/* Subtle Architectural Hairline Grid Hint */
+.editorial-grid-bg {
+  background-image:
+    linear-gradient(to right, rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.024) 1px, transparent 1px);
+  background-size: 96px 96px;
+}
+
+/* Custom Premium Red-Thumb Progress Slider */
+.boat-range-slider {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 4px;
+  border-radius: 9999px;
+  outline: none;
+}
+
+.boat-range-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #ff3b30;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 14px rgba(255, 59, 48, 0.75);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.boat-range-slider::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+  box-shadow: 0 0 18px rgba(255, 59, 48, 0.95);
+}
+
+.boat-range-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 9999px;
+  background: #ff3b30;
+  border: 2px solid #ffffff;
+  box-shadow: 0 0 14px rgba(255, 59, 48, 0.75);
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
