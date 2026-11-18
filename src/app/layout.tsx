@@ -1,7 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
 import { preload } from "react-dom";
-import { SITE_URL } from "@/lib/site";
+import { SITE_URL, SITE_URL_RESOLUTION } from "@/lib/site";
 import {
   getSequenceFramePath,
   SMALL_FRAMES_MEDIA_QUERY,
@@ -26,13 +26,13 @@ const OG_IMAGE = {
   alt: "boAt Rockerz 440 wireless headphones on a dark studio background",
 };
 
-if (!SITE_URL && process.env.NODE_ENV === "production") {
-  console.warn(
-    "[metadata] NEXT_PUBLIC_SITE_URL is not set: canonical URL and social share image tags are omitted."
-  );
+// Missing or invalid NEXT_PUBLIC_SITE_URL never fails the build; it is reported here instead.
+if (SITE_URL_RESOLUTION.warning && process.env.NODE_ENV === "production") {
+  console.warn(`[metadata] ${SITE_URL_RESOLUTION.warning}`);
 }
 
-// Social crawlers need absolute URLs, so URL-dependent tags are only emitted when SITE_URL is known.
+// Social crawlers need absolute URLs, so URL-dependent tags are only emitted when SITE_URL is
+// known. SITE_URL is pre-validated by resolveSiteUrl(), so new URL() here cannot throw.
 export const metadata: Metadata = {
   ...(SITE_URL ? { metadataBase: new URL(SITE_URL) } : {}),
   title: TITLE,

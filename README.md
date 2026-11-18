@@ -13,6 +13,8 @@ An interactive, scroll-driven product showcase for the **boAt Rockerz 440 Wirele
 
 ## Getting started
 
+Requires Node.js 22.13 or newer. The repo's `.node-version` file pins Node 22, and Cloudflare's build uses it too.
+
 ```bash
 npm install
 npm run dev
@@ -34,6 +36,8 @@ Open [http://localhost:3000](http://localhost:3000).
 ## Configuration
 
 Set `NEXT_PUBLIC_SITE_URL` at build time (e.g. in Cloudflare's build environment variables) to your production URL, such as `https://example.com`. It's needed for the canonical URL and the social share image, since crawlers need absolute URLs. Without it, those tags are left out and the build prints a warning.
+
+The value must be a full `https://` URL. Plain `http://` is accepted only for `localhost` and `127.0.0.1`. Surrounding whitespace and trailing slashes are removed. If the value is invalid (for example `example.com` with no scheme, or a `javascript:` URL), the build doesn't fail: it prints a warning naming `NEXT_PUBLIC_SITE_URL` and leaves those tags out.
 
 ## Image pipeline
 
