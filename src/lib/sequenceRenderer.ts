@@ -147,11 +147,13 @@ export function createSequenceRenderer(
   const mobileVerticalShift = options.mobileVerticalShift ?? false;
   const verticalOffsetPct = options.verticalOffsetPct ?? 0;
 
+  // A single full-screen textured quad gains nothing from MSAA, and "default" lets dual-GPU
+  // laptops stay on the integrated GPU instead of waking the discrete one.
   const gl = canvas.getContext("webgl", {
     alpha: false,
-    antialias: true,
+    antialias: false,
     premultipliedAlpha: false,
-    powerPreference: "high-performance",
+    powerPreference: "default",
   });
 
   let currentFrameFloat = 1;
@@ -160,14 +162,25 @@ export function createSequenceRenderer(
   let tweenRafId: number | null = null;
   let drawRafId: number | null = null;
   let disposed = false;
+  let contextLost = false;
 
   // WebGL resources
   let program: WebGLProgram | null = null;
-  let texA: WebGLTexture | null = null;
-  let texB: WebGLTexture | null = null;
   let buffer: WebGLBuffer | null = null;
-  let uploadedImgA: HTMLImageElement | null = null;
-  let uploadedImgB: HTMLImageElement | null = null;
+
+  /**
+   * Two texture slots, each remembering which frame image it currently holds. When the scroll
+   * crosses a frame boundary the "next" frame becomes the "current" one; reusing its slot means
+   * only one new 1920x1080 upload per boundary instead of two.
+   */
+  interface TextureSlot {
+    tex: WebGLTexture | null;
+    img: HTMLImageElement | null;
+  }
+  let slots: [TextureSlot, TextureSlot] = [
+    { tex: null, img: null },
+    { tex: null, img: null },
+  ];
 
   let uTexALoc: WebGLUniformLocation | null = null;
   let uTexBLoc: WebGLUniformLocation | null = null;
@@ -225,8 +238,10 @@ export function createSequenceRenderer(
       return t;
     };
 
-    texA = createTex();
-    texB = createTex();
+    slots = [
+      { tex: createTex(), img: null },
+      { tex: createTex(), img: null },
+    ];
 
     uTexALoc = gl.getUniformLocation(program, "uTexA");
     uTexBLoc = gl.getUniformLocation(program, "uTexB");
@@ -245,28 +260,70 @@ export function createSequenceRenderer(
     return true;
   };
 
-  const hasWebGL = initWebGL();
+  let hasWebGL = initWebGL();
   const ctx2d = hasWebGL ? null : canvas.getContext("2d", { alpha: false });
 
-  const uploadTexture = (
-    unit: number,
-    tex: WebGLTexture | null,
-    img: HTMLImageElement,
-    isA: boolean
-  ) => {
-    if (!gl || !tex) return;
-    if (isA && uploadedImgA === img) return;
-    if (!isA && uploadedImgB === img) return;
+  /**
+   * Ensures `imgA` and `imgB` are resident in texture slots and binds them to units 0 and 1.
+   * Slots already holding the right image are reused; at most the missing ones are uploaded.
+   */
+  const bindFrameTextures = (imgA: HTMLImageElement, imgB: HTMLImageElement) => {
+    if (!gl) return;
 
-    gl.activeTexture(unit);
-    gl.bindTexture(gl.TEXTURE_2D, tex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
-    if (isA) uploadedImgA = img;
-    else uploadedImgB = img;
+    let slotA = slots.find((s) => s.img === imgA);
+    let slotB = imgB === imgA ? slotA : slots.find((s) => s.img === imgB);
+
+    const upload = (slot: TextureSlot, img: HTMLImageElement) => {
+      gl.bindTexture(gl.TEXTURE_2D, slot.tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+      slot.img = img;
+    };
+
+    if (!slotA) {
+      slotA = slots.find((s) => s !== slotB) ?? slots[0];
+      upload(slotA, imgA);
+    }
+    if (!slotB) {
+      slotB = imgB === imgA ? slotA : slots.find((s) => s !== slotA) ?? slots[1];
+      upload(slotB, imgB);
+    }
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, slotA.tex);
+    gl.activeTexture(gl.TEXTURE1);
+    gl.bindTexture(gl.TEXTURE_2D, slotB.tex);
   };
 
+  // Mobile browsers drop WebGL contexts under memory pressure or after backgrounding the tab.
+  // Without these handlers the canvas would stay black until a full reload.
+  const onContextLost = (e: Event) => {
+    e.preventDefault(); // signals that we will handle restoration
+    contextLost = true;
+    if (drawRafId !== null) {
+      cancelAnimationFrame(drawRafId);
+      drawRafId = null;
+    }
+  };
+
+  const onContextRestored = () => {
+    contextLost = false;
+    program = null;
+    buffer = null;
+    slots = [
+      { tex: null, img: null },
+      { tex: null, img: null },
+    ];
+    hasWebGL = initWebGL();
+    renderNow();
+  };
+
+  if (gl) {
+    canvas.addEventListener("webglcontextlost", onContextLost);
+    canvas.addEventListener("webglcontextrestored", onContextRestored);
+  }
+
   const renderNow = () => {
-    if (disposed) return;
+    if (disposed || contextLost) return;
 
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     const vw = canvas.clientWidth;
@@ -332,8 +389,7 @@ export function createSequenceRenderer(
       gl.viewport(0, 0, targetW, targetH);
       gl.useProgram(program);
 
-      uploadTexture(gl.TEXTURE0, texA, imgA, true);
-      uploadTexture(gl.TEXTURE1, texB, imgB || imgA, false);
+      bindFrameTextures(imgA, imgB ?? imgA);
 
       gl.uniform1f(uBlendLoc, blend);
       gl.uniform4f(uRectLoc, drawX / vw, drawY / vh, drawW / vw, drawH / vh);
@@ -460,10 +516,13 @@ export function createSequenceRenderer(
     if (drawRafId !== null) cancelAnimationFrame(drawRafId);
     if (tweenRafId !== null) cancelAnimationFrame(tweenRafId);
     if (gl) {
-      if (texA) gl.deleteTexture(texA);
-      if (texB) gl.deleteTexture(texB);
-      if (buffer) gl.deleteBuffer(buffer);
-      if (program) gl.deleteProgram(program);
+      canvas.removeEventListener("webglcontextlost", onContextLost);
+      canvas.removeEventListener("webglcontextrestored", onContextRestored);
+      if (!contextLost) {
+        slots.forEach((s) => s.tex && gl.deleteTexture(s.tex));
+        if (buffer) gl.deleteBuffer(buffer);
+        if (program) gl.deleteProgram(program);
+      }
     }
   };
 

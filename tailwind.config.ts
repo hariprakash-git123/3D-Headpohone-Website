@@ -16,8 +16,8 @@ const config: Config = {
       },
       fontFamily: {
         sans: [
+          "var(--font-inter)",
           "Inter",
-          "Geist",
           "-apple-system",
           "BlinkMacSystemFont",
           '"SF Pro Display"',

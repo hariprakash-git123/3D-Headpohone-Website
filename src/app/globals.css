@@ -19,6 +19,13 @@
     font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   }
 
+  /* Respect the OS "reduce motion" setting for in-page jumps */
+  @media (prefers-reduced-motion: reduce) {
+    html {
+      scroll-behavior: auto;
+    }
+  }
+
   ::selection {
     background-color: rgba(255, 59, 48, 0.32);
     color: #ffffff;
